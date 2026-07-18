@@ -57,7 +57,7 @@
             }
 
             class Timeseries {
-                constructor(totalSeconds, sampleRateSeconds, settings) {
+                constructor(totalSeconds, sampleRateSeconds, defaultTraceSettings) {
                     this.xAxis = [];
                     var t = new Date();
                     t.setHours(0, 0, 0, 0);
@@ -67,15 +67,15 @@
                         this.xAxis.push(t.toISOString());
                     }
 
-                    this.settings = settings;
+                    this.defaultTraceSettings = defaultTraceSettings;
                     this.traces = [];
                     this.alertFunctions = [];
                 }
 
-                addTrace(f, name) {
+                addTrace(f, settings) {
                     this.traces.push({
                       f: f,
-                      name: name,
+                      settings: settings,
                     });
                 }
 
@@ -149,12 +149,14 @@
                     for (const t of this.traces) {
                         var td = this.buildData(t.f);
                         for (const [key, value] of Object.entries(
-                            this.settings,
+                            this.defaultTraceSettings,
                         )) {
                             td[key] = value;
                         }
-                        if (t.name) {
-                          td.name = t.name;
+                        if (t.settings) {
+                          for (const [key, value] of Object.entries(t.settings)) {
+                            td[key] = value;
+                          }
                         }
                         data.push(td);
                     }
@@ -184,9 +186,6 @@
             var timeline = [];
             var t = new Date();
             t.setHours(0, 0, 0, 0);
-
-            var cumulativeGood = 0;
-            var cumulativeBad = 0;
 
             class SLIWindow {
               constructor(maxValues) {
@@ -282,8 +281,8 @@
             var dataGraph = new Timeseries(TOTAL_SECONDS, SAMPLE_RATE_SECONDS, {
                 type: "scatter",
             });
-            dataGraph.addTrace((i) => timeline[i].good, "good");
-            dataGraph.addTrace((i) => timeline[i].bad, "bad");
+            dataGraph.addTrace((i) => timeline[i].good, { name:"good" });
+            dataGraph.addTrace((i) => timeline[i].bad, { name:"bad" });
 
             t.setSeconds(t.getSeconds() - 50000);
             t2 = new Date(t.getTime());
@@ -314,9 +313,9 @@
             var cumulativeGraph = new Timeseries(TOTAL_SECONDS, SAMPLE_RATE_SECONDS, {
                 type: "scatter",
             });
-            cumulativeGraph.addTrace((i) => 1 - timeline[i].cumulative.errorRate());
-            cumulativeGraph.addTrace((i) => 1 - timeline[i].longWindow.errorRate());
-            cumulativeGraph.addTrace((i) => 1 - timeline[i].shortWindow.errorRate());
+            cumulativeGraph.addTrace((i) => 1 - timeline[i].cumulative.errorRate(), {name: "cumulative"});
+            cumulativeGraph.addTrace((i) => 1 - timeline[i].longWindow.errorRate(), {name: "long window"});
+            cumulativeGraph.addTrace((i) => 1 - timeline[i].shortWindow.errorRate(), {name: "short window"});
             cumulativeGraph.addAlert((i) => {
               l = timeline[i].longWindow.errorRate() / errorBudgetFraction;
               s = timeline[i].shortWindow.errorRate() / errorBudgetFraction;
@@ -327,15 +326,16 @@
             var burnGraph = new Timeseries(TOTAL_SECONDS, SAMPLE_RATE_SECONDS, {
                 type: "scatter",
             });
-            burnGraph.addTrace((i) => timeline[i].cumulative.errorRate() / errorBudgetFraction);
-            burnGraph.addTrace((i) => timeline[i].longWindow.errorRate() / errorBudgetFraction);
-            burnGraph.addTrace((i) => timeline[i].shortWindow.errorRate() / errorBudgetFraction);
+            burnGraph.addTrace((i) => timeline[i].cumulative.errorRate() / errorBudgetFraction, {name: "cumulative"});
+            burnGraph.addTrace((i) => timeline[i].longWindow.errorRate() / errorBudgetFraction, {name: "long window"});
+            burnGraph.addTrace((i) => timeline[i].shortWindow.errorRate() / errorBudgetFraction, {name: "short window"});
             burnGraph.addAlert((i) => {
               l = timeline[i].longWindow.errorRate() / errorBudgetFraction;
               s = timeline[i].shortWindow.errorRate() / errorBudgetFraction;
               return (l > 2 && s > 2);
             })
 
+            // TODO: Make this configurable per graph
             var layout = {
                 shapes: [
                     {
