@@ -68,11 +68,19 @@
                     }
 
                     this.settings = settings;
-                    this.traceFunctions = [];
+                    this.traces = [];
+                    this.alertFunctions = [];
                 }
 
-                addTrace(f) {
-                    this.traceFunctions.push(f);
+                addTrace(f, name) {
+                    this.traces.push({
+                      f: f,
+                      name: name,
+                    });
+                }
+
+                addAlert(f) {
+                  this.alertFunctions.push(f);
                 }
 
                 buildData(f) {
@@ -87,25 +95,91 @@
                     return out;
                 }
 
+                buildAlertShapes(f) {
+                  var alerting = false;
+                  var alertStart = 0;
+                  var shapes = [];
+                  for (var x = 0; x < this.xAxis.length; x++) {
+                    var alertAtX = f(x);
+                    if (alertAtX && !alerting) {
+                      alerting = true;
+                      alertStart = x;
+                    }
+                    if (!alertAtX && alerting) {
+                      shapes.push(
+                        {
+                            type: "rect",
+                            xref: "x", // Ties the X boundaries to data coordinates
+                            yref: "paper", // Sets Y boundaries to cover 100% height of the chart
+                            x0: this.xAxis[alertStart], // Shaded area starts at X = 2
+                            x1: this.xAxis[x], // Shaded area ends at X = 4
+                            y0: 0, // Bottom edge of the chart area
+                            y1: 1, // Top edge of the chart area
+                            fillcolor: "#ff0000", // Background fill color
+                            opacity: 0.3, // Keeps it semi-transparent so data shows through
+                            line: { width: 0 }, // Removes the border around the rectangle
+                        },
+                      );
+                      alerting = false;
+                      alertStart = 0;
+                    }
+                  }
+
+                  if (alerting) {
+                    shapes.push(
+                      {
+                          type: "rect",
+                          xref: "x", // Ties the X boundaries to data coordinates
+                          yref: "paper", // Sets Y boundaries to cover 100% height of the chart
+                          x0: this.xAxis[alertStart], // Shaded area starts at X = 2
+                          x1: this.xAxis[this.xAxis.length], // Shaded area ends at X = 4
+                          y0: 0, // Bottom edge of the chart area
+                          y1: 1, // Top edge of the chart area
+                          fillcolor: "#ff0000", // Background fill color
+                          opacity: 0.3, // Keeps it semi-transparent so data shows through
+                          line: { width: 0 }, // Removes the border around the rectangle
+                      },
+                    );
+                  }
+                  return shapes;
+                }
+
                 render(divID, layout) {
                     var data = [];
-                    for (const t of this.traceFunctions) {
-                        var td = this.buildData(t);
+                    for (const t of this.traces) {
+                        var td = this.buildData(t.f);
                         for (const [key, value] of Object.entries(
                             this.settings,
                         )) {
                             td[key] = value;
                         }
+                        if (t.name) {
+                          td.name = t.name;
+                        }
                         data.push(td);
                     }
+                    if (!layout) {
+                      layout = {};
+                    }
+                    if (!layout.shapes) {
+                      layout.shapes = [];
+                    }
+
+                    for (alert of this.alertFunctions) {
+                      layout.shapes = layout.shapes.concat(this.buildAlertShapes(alert));
+                    }
+
                     Plotly.newPlot(divID, data, layout);
                 }
             }
 
-            const slo_target_fraction = 0.999;
-            var error_budget_fraction = 1 - slo_target_fraction;
+            const TOTAL_SECONDS = 24 * 60 * 60;
+            const SAMPLE_RATE_SECONDS = 60;
+            const SLO_TARGET_FRACTION = 0.999;
+            const LONG_WINDOW_SECONDS = 3 * 60 * 60;
+            const SHORT_WINDOW_SECONDS = LONG_WINDOW_SECONDS / 12;
 
-            const sample_rate_s = 60;
+            const errorBudgetFraction = 1 - SLO_TARGET_FRACTION;
 
             var timeline = [];
             var t = new Date();
@@ -114,52 +188,108 @@
             var cumulativeGood = 0;
             var cumulativeBad = 0;
 
+            class SLIWindow {
+              constructor(maxValues) {
+                this.good = [];
+                this.bad = [];
+                this.maxValues = maxValues;
+              }
+
+              clone() {
+                var out = new SLIWindow(this.maxValues);
+                for (var g of this.good) {
+                  out.good.push(g);
+                }
+                for (var b of this.bad) {
+                  out.bad.push(b);
+                }
+                return out;
+              }
+
+              push(good, bad) {
+                this.good.push(good);
+                this.bad.push(bad);
+
+                if (this.good.length > this.maxValues) {
+                  this.good = this.good.slice(1);
+                }
+                if (this.bad.length > this.maxValues) {
+                  this.bad = this.bad.slice(1);
+                }
+              }
+
+              sum() {
+                var out = {
+                  good: 0,
+                  bad: 0,
+                }
+
+                for (var v of this.good) {
+                  out.good += v;
+                }
+                for (var v of this.bad) {
+                  out.bad += v;
+                }
+
+                return out;
+              }
+
+              errorRate() {
+                const s = this.sum();
+                return s.bad / (s.good + s.bad);
+              }
+            }
+
+            var cumulative = new SLIWindow(TOTAL_SECONDS / SAMPLE_RATE_SECONDS);
+            var longWindow = new SLIWindow(LONG_WINDOW_SECONDS / SAMPLE_RATE_SECONDS);
+            var shortWindow = new SLIWindow(SHORT_WINDOW_SECONDS / SAMPLE_RATE_SECONDS);
+
             const perlin = new Perlin();
 
-            const TOTAL_SECONDS = 24 * 60 * 60;
-
-            for (i = 0; i < TOTAL_SECONDS; i += sample_rate_s) {
-                t.setSeconds(t.getSeconds() + sample_rate_s);
+            for (i = 0; i < TOTAL_SECONDS; i += SAMPLE_RATE_SECONDS) {
+                t.setSeconds(t.getSeconds() + SAMPLE_RATE_SECONDS);
+                // TODO: Add noise and a daily cycle
                 const amplitude = 100000;
-                const frequency = 1 / (24 * 60 * 10);
-                value = amplitude * Math.sin(frequency * i) + amplitude;
-                jitter = Math.random() * 10000;
-                good = amplitude; //value; // + jitter;
+                good = amplitude;
 
-                errorRate = perlin.getValue((256 / 4) * (i / TOTAL_SECONDS));
+                errorRate = perlin.getValue((256 / 2) * (i / TOTAL_SECONDS));
 
-                // Don't allow negative errors and stop producing errors halfway through
-                if (errorRate < 0 || i > TOTAL_SECONDS / 2) {
+                // Errors can only be above 0
+                if (errorRate < 0) {
                     errorRate = 0;
                 }
+                // Limit error duration
+                if  (i < TOTAL_SECONDS / 4 || i > TOTAL_SECONDS / 4 + 3*60*60) {
+                  errorRate = 0;
+                }
                 // Scale maximum error percentage
-                errorRate *= 0.001;
+                errorRate *= 0.1;
 
-                cumulativeGood += good;
-                cumulativeBad += good * errorRate;
+                cumulative.push(good, good * errorRate);
+                longWindow.push(good, good*errorRate);
+                shortWindow.push(good, good*errorRate);
 
                 timeline.push({
                     time: t.toISOString(),
-                    requests: good,
-                    error_rate: errorRate,
-                    cumulativeGood: cumulativeGood,
-                    cumulativeBad: cumulativeBad,
+                    good: good,
+                    bad: good * errorRate,
+                    cumulative: cumulative.clone(),
+                    longWindow: longWindow.clone(),
+                    shortWindow: shortWindow.clone(),
                 });
             }
 
-            var dataGraph = new Timeseries(TOTAL_SECONDS, sample_rate_s, {
+            var dataGraph = new Timeseries(TOTAL_SECONDS, SAMPLE_RATE_SECONDS, {
                 type: "scatter",
             });
-            dataGraph.addTrace((i) => timeline[i].requests);
-            dataGraph.addTrace(
-                (i) => timeline[i].requests * timeline[i].error_rate,
-            );
+            dataGraph.addTrace((i) => timeline[i].good, "good");
+            dataGraph.addTrace((i) => timeline[i].bad, "bad");
 
             t.setSeconds(t.getSeconds() - 50000);
             t2 = new Date(t.getTime());
             t2.setSeconds(t2.getSeconds() + 5000);
             var layout = {
-                showlegend: false,
+                //showlegend: false,
                 annotations: [
                     {
                         x: t.toISOString(),
@@ -173,58 +303,59 @@
                         ay: -250,
                     },
                 ],
+            };
+            dataGraph.addAlert((i) => {
+              l = timeline[i].longWindow.errorRate() / errorBudgetFraction;
+              s = timeline[i].shortWindow.errorRate() / errorBudgetFraction;
+              return (l > 2 && s > 2);
+            })
+            dataGraph.render("events", layout);
+
+            var cumulativeGraph = new Timeseries(TOTAL_SECONDS, SAMPLE_RATE_SECONDS, {
+                type: "scatter",
+            });
+            cumulativeGraph.addTrace((i) => 1 - timeline[i].cumulative.errorRate());
+            cumulativeGraph.addTrace((i) => 1 - timeline[i].longWindow.errorRate());
+            cumulativeGraph.addTrace((i) => 1 - timeline[i].shortWindow.errorRate());
+            cumulativeGraph.addAlert((i) => {
+              l = timeline[i].longWindow.errorRate() / errorBudgetFraction;
+              s = timeline[i].shortWindow.errorRate() / errorBudgetFraction;
+              return (l > 2 && s > 2);
+            })
+            cumulativeGraph.render("cumulative");
+
+            var burnGraph = new Timeseries(TOTAL_SECONDS, SAMPLE_RATE_SECONDS, {
+                type: "scatter",
+            });
+            burnGraph.addTrace((i) => timeline[i].cumulative.errorRate() / errorBudgetFraction);
+            burnGraph.addTrace((i) => timeline[i].longWindow.errorRate() / errorBudgetFraction);
+            burnGraph.addTrace((i) => timeline[i].shortWindow.errorRate() / errorBudgetFraction);
+            burnGraph.addAlert((i) => {
+              l = timeline[i].longWindow.errorRate() / errorBudgetFraction;
+              s = timeline[i].shortWindow.errorRate() / errorBudgetFraction;
+              return (l > 2 && s > 2);
+            })
+
+            var layout = {
                 shapes: [
                     {
                         type: "line",
                         xref: "paper", // Uses the plot area proportions (0 to 1)
                         yref: "y", // Ties the height directly to your y-axis values
                         x0: 0, // Start at the far left edge of the chart grid
-                        y0: 50000, // The y-value threshold location
+                        y0: 2, // The y-value threshold location
                         x1: 1, // Extend to the far right edge of the chart grid
-                        y1: 50000, // Same y-value to ensure the line stays horizontal
+                        y1: 2, // Same y-value to ensure the line stays horizontal
                         line: {
                             color: "rgb(255, 0, 0)",
                             width: 1,
                             dash: "dash", // Style options: 'solid', 'dot', 'dash', 'dashdot'
                         },
                     },
-                    {
-                        type: "rect",
-                        xref: "x", // Ties the X boundaries to data coordinates
-                        yref: "paper", // Sets Y boundaries to cover 100% height of the chart
-                        x0: t.toISOString(), // Shaded area starts at X = 2
-                        x1: t2.toISOString(), // Shaded area ends at X = 4
-                        y0: 0, // Bottom edge of the chart area
-                        y1: 1, // Top edge of the chart area
-                        fillcolor: "#7effa9", // Background fill color
-                        opacity: 0.3, // Keeps it semi-transparent so data shows through
-                        line: { width: 0 }, // Removes the border around the rectangle
-                    },
                 ],
             };
-            dataGraph.render("events", layout);
 
-            var cumulativeGraph = new Timeseries(TOTAL_SECONDS, sample_rate_s, {
-                type: "scatter",
-            });
-            cumulativeGraph.addTrace((i) => {
-                good = timeline[i].cumulativeGood;
-                bad = timeline[i].cumulativeBad;
-                observedErrorRate = bad / (good + bad);
-                return 1 - observedErrorRate;
-            });
-            cumulativeGraph.render("cumulative");
-
-            var burnGraph = new Timeseries(TOTAL_SECONDS, sample_rate_s, {
-                type: "scatter",
-            });
-            burnGraph.addTrace((i) => {
-                good = timeline[i].cumulativeGood;
-                bad = timeline[i].cumulativeBad;
-                observedErrorRate = bad / (good + bad);
-                return observedErrorRate / error_budget_fraction;
-            });
-            burnGraph.render("budget");
+            burnGraph.render("budget",layout);
 
             var myPlot = document.getElementById("events");
             myPlot.on("plotly_click", function (cdata) {
