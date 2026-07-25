@@ -201,27 +201,9 @@
                         return l > 2 && s > 2;
                     });
 
-                    // TODO: Make this configurable per graph
-                    var layout = {
-                        shapes: [
-                            {
-                                type: "line",
-                                xref: "paper", // Uses the plot area proportions (0 to 1)
-                                yref: "y", // Ties the height directly to your y-axis values
-                                x0: 0, // Start at the far left edge of the chart grid
-                                y0: 2, // The y-value threshold location
-                                x1: 1, // Extend to the far right edge of the chart grid
-                                y1: 2, // Same y-value to ensure the line stays horizontal
-                                line: {
-                                    color: "rgb(255, 0, 0)",
-                                    width: 1,
-                                    dash: "dash", // Style options: 'solid', 'dot', 'dash', 'dashdot'
-                                },
-                            },
-                        ],
-                    };
+                    burnGraph.addThreshold(burnRateThreshold);
 
-                    burnGraph.render("budget", layout);
+                    burnGraph.render("budget");
 
                     var myPlot = document.getElementById("events");
                     myPlot.on("plotly_click", function (cdata) {

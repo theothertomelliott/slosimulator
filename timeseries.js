@@ -12,6 +12,7 @@ class Timeseries {
     this.defaultTraceSettings = defaultTraceSettings;
     this.traces = [];
     this.alertFunctions = [];
+    this.thresholds = [];
   }
 
   addTrace(f, settings) {
@@ -23,6 +24,10 @@ class Timeseries {
 
   addAlert(f) {
     this.alertFunctions.push(f);
+  }
+
+  addThreshold(y) {
+    this.thresholds.push(y);
   }
 
   buildData(f) {
@@ -105,6 +110,22 @@ class Timeseries {
 
     for (alert of this.alertFunctions) {
       layout.shapes = layout.shapes.concat(this.buildAlertShapes(alert));
+    }
+    for (var y of this.thresholds) {
+      layout.shapes.push({
+        type: "line",
+        xref: "paper", // Uses the plot area proportions (0 to 1)
+        yref: "y", // Ties the height directly to your y-axis values
+        x0: 0, // Start at the far left edge of the chart grid
+        y0: y, // The y-value threshold location
+        x1: 1, // Extend to the far right edge of the chart grid
+        y1: y, // Same y-value to ensure the line stays horizontal
+        line: {
+          color: "rgb(255, 0, 0)",
+          width: 1,
+          dash: "dash", // Style options: 'solid', 'dot', 'dash', 'dashdot'
+        },
+      });
     }
 
     Plotly.newPlot(divID, data, layout);
