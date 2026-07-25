@@ -1,383 +1,274 @@
 <html>
     <head>
+        <title>SLO Simulator</title>
+
         <!-- Load plotly.js into the DOM -->
         <script src="https://cdn.plot.ly/plotly-3.6.0.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/seedrandom/3.0.5/seedrandom.min.js"></script>
+        <script src="perlin.js"></script>
+        <script src="timeseries.js"></script>
     </head>
 
     <body>
         <!-- Graph of events -->
+        <h1>Settings</h1>
+        SLO Target %:
+        <input type="text" name="slo_target_percent" value="99.9" /><br />
+        Long Window (seconds):
+        <input type="text" name="long_window_seconds" value="10800" /><br />
+        Short Window (seconds):
+        <input type="text" name="short_window_seconds" value="900" /><br />
+
         <h1>Events</h1>
         <div id="events" style="height: 500px"></div>
+
         <h1>Cumulative rate</h1>
         <div id="cumulative" style="height: 500px"></div>
+
         <h1>Burn</h1>
         <div id="budget" style="height: 500px"></div>
 
         <script>
-            class Perlin {
-                constructor() {
-                    // Quick and dirty permutation table
-                    this.perm = (() => {
-                        const tmp = Array.from({ length: 256 }, () =>
-                            Math.floor(Math.random() * 256),
-                        );
-                        return tmp.concat(tmp);
-                    })();
-                }
-
-                grad(i, x) {
-                    const h = i & 0xf;
-                    const grad = 1 + (h & 7);
-
-                    if ((h & 8) !== 0) {
-                        return -grad * x;
-                    }
-
-                    return grad * x;
-                }
-
-                getValue(x) {
-                    const i0 = Math.floor(x);
-                    const i1 = i0 + 1;
-
-                    const x0 = x - i0;
-                    const x1 = x0 - 1;
-
-                    let t0 = 1 - x0 * x0;
-                    t0 *= t0;
-
-                    let t1 = 1 - x1 * x1;
-                    t1 *= t1;
-
-                    const n0 = t0 * t0 * this.grad(this.perm[i0 & 0xff], x0);
-                    const n1 = t1 * t1 * this.grad(this.perm[i1 & 0xff], x1);
-
-                    return 0.395 * (n0 + n1); //Output is between -1 and 1.
-                }
-            }
-
-            class Timeseries {
-                constructor(totalSeconds, sampleRateSeconds, defaultTraceSettings) {
-                    this.xAxis = [];
-                    var t = new Date();
-                    t.setHours(0, 0, 0, 0);
-                    var j = 0;
-                    for (i = 0; i < totalSeconds; i += sampleRateSeconds) {
-                        t.setSeconds(t.getSeconds() + sampleRateSeconds);
-                        this.xAxis.push(t.toISOString());
-                    }
-
-                    this.defaultTraceSettings = defaultTraceSettings;
-                    this.traces = [];
-                    this.alertFunctions = [];
-                }
-
-                addTrace(f, settings) {
-                    this.traces.push({
-                      f: f,
-                      settings: settings,
-                    });
-                }
-
-                addAlert(f) {
-                  this.alertFunctions.push(f);
-                }
-
-                buildData(f) {
-                    var out = {
-                        x: [],
-                        y: [],
-                    };
-                    for (i = 0; i < this.xAxis.length; i++) {
-                        out.x.push(this.xAxis[i]);
-                        out.y.push(f(i));
-                    }
-                    return out;
-                }
-
-                buildAlertShapes(f) {
-                  var alerting = false;
-                  var alertStart = 0;
-                  var shapes = [];
-                  for (var x = 0; x < this.xAxis.length; x++) {
-                    var alertAtX = f(x);
-                    if (alertAtX && !alerting) {
-                      alerting = true;
-                      alertStart = x;
-                    }
-                    if (!alertAtX && alerting) {
-                      shapes.push(
-                        {
-                            type: "rect",
-                            xref: "x", // Ties the X boundaries to data coordinates
-                            yref: "paper", // Sets Y boundaries to cover 100% height of the chart
-                            x0: this.xAxis[alertStart], // Shaded area starts at X = 2
-                            x1: this.xAxis[x], // Shaded area ends at X = 4
-                            y0: 0, // Bottom edge of the chart area
-                            y1: 1, // Top edge of the chart area
-                            fillcolor: "#ff0000", // Background fill color
-                            opacity: 0.3, // Keeps it semi-transparent so data shows through
-                            line: { width: 0 }, // Removes the border around the rectangle
-                        },
-                      );
-                      alerting = false;
-                      alertStart = 0;
-                    }
-                  }
-
-                  if (alerting) {
-                    shapes.push(
-                      {
-                          type: "rect",
-                          xref: "x", // Ties the X boundaries to data coordinates
-                          yref: "paper", // Sets Y boundaries to cover 100% height of the chart
-                          x0: this.xAxis[alertStart], // Shaded area starts at X = 2
-                          x1: this.xAxis[this.xAxis.length], // Shaded area ends at X = 4
-                          y0: 0, // Bottom edge of the chart area
-                          y1: 1, // Top edge of the chart area
-                          fillcolor: "#ff0000", // Background fill color
-                          opacity: 0.3, // Keeps it semi-transparent so data shows through
-                          line: { width: 0 }, // Removes the border around the rectangle
-                      },
-                    );
-                  }
-                  return shapes;
-                }
-
-                render(divID, layout) {
-                    var data = [];
-                    for (const t of this.traces) {
-                        var td = this.buildData(t.f);
-                        for (const [key, value] of Object.entries(
-                            this.defaultTraceSettings,
-                        )) {
-                            td[key] = value;
-                        }
-                        if (t.settings) {
-                          for (const [key, value] of Object.entries(t.settings)) {
-                            td[key] = value;
-                          }
-                        }
-                        data.push(td);
-                    }
-                    if (!layout) {
-                      layout = {};
-                    }
-                    if (!layout.shapes) {
-                      layout.shapes = [];
-                    }
-
-                    for (alert of this.alertFunctions) {
-                      layout.shapes = layout.shapes.concat(this.buildAlertShapes(alert));
-                    }
-
-                    Plotly.newPlot(divID, data, layout);
-                }
-            }
-
             const TOTAL_SECONDS = 24 * 60 * 60;
             const SAMPLE_RATE_SECONDS = 60;
             const SLO_TARGET_FRACTION = 0.999;
             const LONG_WINDOW_SECONDS = 3 * 60 * 60;
             const SHORT_WINDOW_SECONDS = LONG_WINDOW_SECONDS / 12;
 
-            const errorBudgetFraction = 1 - SLO_TARGET_FRACTION;
-
-            var timeline = [];
-            var t = new Date();
-            t.setHours(0, 0, 0, 0);
-
-            class SLIWindow {
-              constructor(maxValues) {
-                this.good = [];
-                this.bad = [];
-                this.maxValues = maxValues;
-              }
-
-              clone() {
-                var out = new SLIWindow(this.maxValues);
-                for (var g of this.good) {
-                  out.good.push(g);
-                }
-                for (var b of this.bad) {
-                  out.bad.push(b);
-                }
-                return out;
-              }
-
-              push(good, bad) {
-                this.good.push(good);
-                this.bad.push(bad);
-
-                if (this.good.length > this.maxValues) {
-                  this.good = this.good.slice(1);
-                }
-                if (this.bad.length > this.maxValues) {
-                  this.bad = this.bad.slice(1);
-                }
-              }
-
-              sum() {
-                var out = {
-                  good: 0,
-                  bad: 0,
+            class AlertView {
+                constructor(totalSeconds, sampleRateSeconds) {
+                    this.totalSeconds = totalSeconds;
+                    this.sampleRateSeconds = sampleRateSeconds;
                 }
 
-                for (var v of this.good) {
-                  out.good += v;
-                }
-                for (var v of this.bad) {
-                  out.bad += v;
-                }
+                render(
+                    sloTargetFraction,
+                    longWindowSeconds,
+                    shortWindowSeconds,
+                ) {
+                    const errorBudgetFraction = 1 - sloTargetFraction;
 
-                return out;
-              }
+                    var timeline = [];
+                    var t = new Date();
+                    t.setHours(0, 0, 0, 0);
 
-              errorRate() {
-                const s = this.sum();
-                return s.bad / (s.good + s.bad);
-              }
+                    var cumulative = new SLIWindow(
+                        this.totalSeconds / this.sampleRateSeconds,
+                    );
+                    var longWindow = new SLIWindow(
+                        longWindowSeconds / this.sampleRateSeconds,
+                    );
+                    var shortWindow = new SLIWindow(
+                        shortWindowSeconds / this.sampleRateSeconds,
+                    );
+
+                    const perlin = new Perlin(3);
+
+                    for (
+                        var i = 0;
+                        i < this.totalSeconds;
+                        i += this.sampleRateSeconds
+                    ) {
+                        t.setSeconds(t.getSeconds() + this.sampleRateSeconds);
+                        // TODO: Add noise and a daily cycle
+                        const amplitude = 100000;
+                        var good = amplitude;
+
+                        var errorRate = perlin.getValue(
+                            (256 / 2) * (i / this.totalSeconds),
+                        );
+
+                        // Errors can only be above 0
+                        if (errorRate < 0) {
+                            errorRate = 0;
+                        }
+                        // Limit error duration
+                        if (
+                            i < this.totalSeconds / 4 ||
+                            i > this.totalSeconds / 4 + 3 * 60 * 60
+                        ) {
+                            errorRate = 0;
+                        }
+                        // Scale maximum error percentage
+                        errorRate *= 0.1;
+
+                        cumulative.push(good, good * errorRate);
+                        longWindow.push(good, good * errorRate);
+                        shortWindow.push(good, good * errorRate);
+
+                        timeline.push({
+                            time: t.toISOString(),
+                            good: good,
+                            bad: good * errorRate,
+                            cumulative: cumulative.clone(),
+                            longWindow: longWindow.clone(),
+                            shortWindow: shortWindow.clone(),
+                        });
+                    }
+
+                    var dataGraph = new Timeseries(
+                        this.totalSeconds,
+                        this.sampleRateSeconds,
+                        {
+                            type: "scatter",
+                        },
+                    );
+                    dataGraph.addTrace((i) => timeline[i].good, {
+                        name: "good",
+                    });
+                    dataGraph.addTrace((i) => timeline[i].bad, { name: "bad" });
+
+                    t.setSeconds(t.getSeconds() - 50000);
+                    var t2 = new Date(t.getTime());
+                    t2.setSeconds(t2.getSeconds() + 5000);
+
+                    dataGraph.addAlert((i) => {
+                        const l =
+                            timeline[i].longWindow.errorRate() /
+                            errorBudgetFraction;
+                        const s =
+                            timeline[i].shortWindow.errorRate() /
+                            errorBudgetFraction;
+                        return l > 2 && s > 2;
+                    });
+                    dataGraph.render("events");
+
+                    var cumulativeGraph = new Timeseries(
+                        this.totalSeconds,
+                        this.sampleRateSeconds,
+                        {
+                            type: "scatter",
+                        },
+                    );
+                    cumulativeGraph.addTrace(
+                        (i) => 1 - timeline[i].cumulative.errorRate(),
+                        { name: "cumulative" },
+                    );
+                    cumulativeGraph.addTrace(
+                        (i) => 1 - timeline[i].longWindow.errorRate(),
+                        { name: "long window" },
+                    );
+                    cumulativeGraph.addTrace(
+                        (i) => 1 - timeline[i].shortWindow.errorRate(),
+                        { name: "short window" },
+                    );
+                    cumulativeGraph.addAlert((i) => {
+                        const l =
+                            timeline[i].longWindow.errorRate() /
+                            errorBudgetFraction;
+                        const s =
+                            timeline[i].shortWindow.errorRate() /
+                            errorBudgetFraction;
+                        return l > 2 && s > 2;
+                    });
+                    cumulativeGraph.render("cumulative");
+
+                    var burnGraph = new Timeseries(
+                        this.totalSeconds,
+                        this.sampleRateSeconds,
+                        {
+                            type: "scatter",
+                        },
+                    );
+                    burnGraph.addTrace(
+                        (i) =>
+                            timeline[i].cumulative.errorRate() /
+                            errorBudgetFraction,
+                        { name: "cumulative" },
+                    );
+                    burnGraph.addTrace(
+                        (i) =>
+                            timeline[i].longWindow.errorRate() /
+                            errorBudgetFraction,
+                        { name: "long window" },
+                    );
+                    burnGraph.addTrace(
+                        (i) =>
+                            timeline[i].shortWindow.errorRate() /
+                            errorBudgetFraction,
+                        { name: "short window" },
+                    );
+                    burnGraph.addAlert((i) => {
+                        const l =
+                            timeline[i].longWindow.errorRate() /
+                            errorBudgetFraction;
+                        const s =
+                            timeline[i].shortWindow.errorRate() /
+                            errorBudgetFraction;
+                        return l > 2 && s > 2;
+                    });
+
+                    // TODO: Make this configurable per graph
+                    var layout = {
+                        shapes: [
+                            {
+                                type: "line",
+                                xref: "paper", // Uses the plot area proportions (0 to 1)
+                                yref: "y", // Ties the height directly to your y-axis values
+                                x0: 0, // Start at the far left edge of the chart grid
+                                y0: 2, // The y-value threshold location
+                                x1: 1, // Extend to the far right edge of the chart grid
+                                y1: 2, // Same y-value to ensure the line stays horizontal
+                                line: {
+                                    color: "rgb(255, 0, 0)",
+                                    width: 1,
+                                    dash: "dash", // Style options: 'solid', 'dot', 'dash', 'dashdot'
+                                },
+                            },
+                        ],
+                    };
+
+                    burnGraph.render("budget", layout);
+
+                    var myPlot = document.getElementById("events");
+                    myPlot.on("plotly_click", function (cdata) {
+                        for (var i = 0; i < cdata.points.length; i++) {
+                            t = cdata.points[i].x;
+                            pi = cdata.points[i].pointIndex;
+                            eventData[1]["y"][pi] = 100000;
+                        }
+                        Plotly.animate(
+                            "events",
+                            { data: eventData, layout: layout },
+                            {
+                                transition: {
+                                    duration: 5,
+                                    easing: "cubic-in-out",
+                                },
+                                frame: {
+                                    duration: 5,
+                                },
+                            },
+                        );
+                    });
+                }
             }
 
-            var cumulative = new SLIWindow(TOTAL_SECONDS / SAMPLE_RATE_SECONDS);
-            var longWindow = new SLIWindow(LONG_WINDOW_SECONDS / SAMPLE_RATE_SECONDS);
-            var shortWindow = new SLIWindow(SHORT_WINDOW_SECONDS / SAMPLE_RATE_SECONDS);
+            ac = new AlertView(TOTAL_SECONDS, SAMPLE_RATE_SECONDS);
 
-            const perlin = new Perlin();
+            const inputSloTargetPercent = document.querySelector(
+                'input[name="slo_target_percent"]',
+            );
+            const inputLongWindowSeconds = document.querySelector(
+                'input[name="long_window_seconds"]',
+            );
+            const inputShortWindowSeconds = document.querySelector(
+                'input[name="short_window_seconds"]',
+            );
 
-            for (i = 0; i < TOTAL_SECONDS; i += SAMPLE_RATE_SECONDS) {
-                t.setSeconds(t.getSeconds() + SAMPLE_RATE_SECONDS);
-                // TODO: Add noise and a daily cycle
-                const amplitude = 100000;
-                good = amplitude;
-
-                errorRate = perlin.getValue((256 / 2) * (i / TOTAL_SECONDS));
-
-                // Errors can only be above 0
-                if (errorRate < 0) {
-                    errorRate = 0;
-                }
-                // Limit error duration
-                if  (i < TOTAL_SECONDS / 4 || i > TOTAL_SECONDS / 4 + 3*60*60) {
-                  errorRate = 0;
-                }
-                // Scale maximum error percentage
-                errorRate *= 0.1;
-
-                cumulative.push(good, good * errorRate);
-                longWindow.push(good, good*errorRate);
-                shortWindow.push(good, good*errorRate);
-
-                timeline.push({
-                    time: t.toISOString(),
-                    good: good,
-                    bad: good * errorRate,
-                    cumulative: cumulative.clone(),
-                    longWindow: longWindow.clone(),
-                    shortWindow: shortWindow.clone(),
-                });
-            }
-
-            var dataGraph = new Timeseries(TOTAL_SECONDS, SAMPLE_RATE_SECONDS, {
-                type: "scatter",
-            });
-            dataGraph.addTrace((i) => timeline[i].good, { name:"good" });
-            dataGraph.addTrace((i) => timeline[i].bad, { name:"bad" });
-
-            t.setSeconds(t.getSeconds() - 50000);
-            t2 = new Date(t.getTime());
-            t2.setSeconds(t2.getSeconds() + 5000);
-            var layout = {
-                //showlegend: false,
-                annotations: [
-                    {
-                        x: t.toISOString(),
-                        y: 0,
-                        xref: "x",
-                        yref: "y",
-                        text: "Something happened here",
-                        showarrow: true,
-                        arrowhead: 7,
-                        ax: 0,
-                        ay: -250,
-                    },
-                ],
-            };
-            dataGraph.addAlert((i) => {
-              l = timeline[i].longWindow.errorRate() / errorBudgetFraction;
-              s = timeline[i].shortWindow.errorRate() / errorBudgetFraction;
-              return (l > 2 && s > 2);
-            })
-            dataGraph.render("events", layout);
-
-            var cumulativeGraph = new Timeseries(TOTAL_SECONDS, SAMPLE_RATE_SECONDS, {
-                type: "scatter",
-            });
-            cumulativeGraph.addTrace((i) => 1 - timeline[i].cumulative.errorRate(), {name: "cumulative"});
-            cumulativeGraph.addTrace((i) => 1 - timeline[i].longWindow.errorRate(), {name: "long window"});
-            cumulativeGraph.addTrace((i) => 1 - timeline[i].shortWindow.errorRate(), {name: "short window"});
-            cumulativeGraph.addAlert((i) => {
-              l = timeline[i].longWindow.errorRate() / errorBudgetFraction;
-              s = timeline[i].shortWindow.errorRate() / errorBudgetFraction;
-              return (l > 2 && s > 2);
-            })
-            cumulativeGraph.render("cumulative");
-
-            var burnGraph = new Timeseries(TOTAL_SECONDS, SAMPLE_RATE_SECONDS, {
-                type: "scatter",
-            });
-            burnGraph.addTrace((i) => timeline[i].cumulative.errorRate() / errorBudgetFraction, {name: "cumulative"});
-            burnGraph.addTrace((i) => timeline[i].longWindow.errorRate() / errorBudgetFraction, {name: "long window"});
-            burnGraph.addTrace((i) => timeline[i].shortWindow.errorRate() / errorBudgetFraction, {name: "short window"});
-            burnGraph.addAlert((i) => {
-              l = timeline[i].longWindow.errorRate() / errorBudgetFraction;
-              s = timeline[i].shortWindow.errorRate() / errorBudgetFraction;
-              return (l > 2 && s > 2);
-            })
-
-            // TODO: Make this configurable per graph
-            var layout = {
-                shapes: [
-                    {
-                        type: "line",
-                        xref: "paper", // Uses the plot area proportions (0 to 1)
-                        yref: "y", // Ties the height directly to your y-axis values
-                        x0: 0, // Start at the far left edge of the chart grid
-                        y0: 2, // The y-value threshold location
-                        x1: 1, // Extend to the far right edge of the chart grid
-                        y1: 2, // Same y-value to ensure the line stays horizontal
-                        line: {
-                            color: "rgb(255, 0, 0)",
-                            width: 1,
-                            dash: "dash", // Style options: 'solid', 'dot', 'dash', 'dashdot'
-                        },
-                    },
-                ],
-            };
-
-            burnGraph.render("budget",layout);
-
-            var myPlot = document.getElementById("events");
-            myPlot.on("plotly_click", function (cdata) {
-                for (var i = 0; i < cdata.points.length; i++) {
-                    t = cdata.points[i].x;
-                    pi = cdata.points[i].pointIndex;
-                    eventData[1]["y"][pi] = 100000;
-                }
-                Plotly.animate(
-                    "events",
-                    { data: eventData, layout: layout },
-                    {
-                        transition: {
-                            duration: 5,
-                            easing: "cubic-in-out",
-                        },
-                        frame: {
-                            duration: 5,
-                        },
-                    },
+            doRender = function () {
+                ac.render(
+                    inputSloTargetPercent.value / 100,
+                    inputLongWindowSeconds.value,
+                    inputShortWindowSeconds.value,
                 );
-            });
+            };
+
+            inputSloTargetPercent.addEventListener("change", doRender);
+            inputLongWindowSeconds.addEventListener("change", doRender);
+            inputShortWindowSeconds.addEventListener("change", doRender);
+
+            doRender();
         </script>
     </body>
 </html>
