@@ -12,6 +12,7 @@
     <body>
         <!-- Graph of events -->
         <h1>Settings</h1>
+        <h2>SLO & Alert</h2>
         SLO Target %:
         <input type="text" name="slo_target_percent" value="99.9" /><br />
         Long Window (seconds):
@@ -20,6 +21,8 @@
         <input type="text" name="short_window_seconds" value="900" /><br />
         Burn rate threshold:
         <input type="text" name="burn_rate_threshold" value="2" /><br />
+
+        <h2>Error Generation</h2>
         Max Error Percentage:
         <input type="text" name="max_error_percent" value="10" /><br />
 
@@ -204,28 +207,6 @@
                     burnGraph.addThreshold(burnRateThreshold);
 
                     burnGraph.render("budget");
-
-                    var myPlot = document.getElementById("events");
-                    myPlot.on("plotly_click", function (cdata) {
-                        for (var i = 0; i < cdata.points.length; i++) {
-                            t = cdata.points[i].x;
-                            pi = cdata.points[i].pointIndex;
-                            eventData[1]["y"][pi] = 100000;
-                        }
-                        Plotly.animate(
-                            "events",
-                            { data: eventData, layout: layout },
-                            {
-                                transition: {
-                                    duration: 5,
-                                    easing: "cubic-in-out",
-                                },
-                                frame: {
-                                    duration: 5,
-                                },
-                            },
-                        );
-                    });
                 }
             }
 
