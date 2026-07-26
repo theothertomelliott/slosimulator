@@ -29,9 +29,6 @@
         <h1>Events</h1>
         <div id="events" style="height: 500px"></div>
 
-        <h1>Cumulative rate</h1>
-        <div id="cumulative" style="height: 500px"></div>
-
         <h1>Burn</h1>
         <div id="budget" style="height: 500px"></div>
 
@@ -40,19 +37,18 @@
             const SAMPLE_RATE_SECONDS = 60;
 
             class AlertView {
-                constructor(totalSeconds, sampleRateSeconds) {
+                constructor(elem, totalSeconds, sampleRateSeconds) {
+                    this.elem = elem;
                     this.totalSeconds = totalSeconds;
                     this.sampleRateSeconds = sampleRateSeconds;
                 }
 
-                render(
-                    sloTargetFraction,
-                    longWindowSeconds,
-                    shortWindowSeconds,
-                    maxErrorRate,
-                    burnRateThreshold,
-                ) {
+                renderWithHydratedConfig(config){
+                    const sloTargetFraction = config.slo.targetPercent / 100;
                     const errorBudgetFraction = 1 - sloTargetFraction;
+                    const burnRateThreshold = config.slo.burnRateThreshold;
+
+                    const maxErrorRate = config.data.bad.maxErrorPercent / 100;
 
                     var timeline = [];
                     var t = new Date();
@@ -62,10 +58,10 @@
                         this.totalSeconds / this.sampleRateSeconds,
                     );
                     var longWindow = new SLIWindow(
-                        longWindowSeconds / this.sampleRateSeconds,
+                        config.slo.longWindowSeconds / this.sampleRateSeconds,
                     );
                     var shortWindow = new SLIWindow(
-                        shortWindowSeconds / this.sampleRateSeconds,
+                        config.slo.shortWindowSeconds / this.sampleRateSeconds,
                     );
 
                     const perlin = new Perlin(3);
@@ -119,14 +115,47 @@
                             type: "scatter",
                         },
                     );
-                    dataGraph.addTrace((i) => timeline[i].good, {
-                        name: "good",
-                    });
-                    dataGraph.addTrace((i) => timeline[i].bad, { name: "bad" });
-
-                    t.setSeconds(t.getSeconds() - 50000);
-                    var t2 = new Date(t.getTime());
-                    t2.setSeconds(t2.getSeconds() + 5000);
+                    if (config.traces.good) {
+                      dataGraph.addTrace((i) => timeline[i].good, { name: "good" });
+                    }
+                    if (config.traces.bad) {
+                      dataGraph.addTrace((i) => timeline[i].bad, { name: "bad" });
+                    }
+                    if (config.traces.cumulativeErrors) {
+                      dataGraph.addTrace(
+                        (i) => 1 - timeline[i].cumulative.errorRate(),
+                        { name: "cumulative" },
+                      );
+                    }
+                    if (config.traces.cumulativeLong) {
+                      dataGraph.addTrace(
+                          (i) => 1 - timeline[i].longWindow.errorRate(),
+                          { name: "long window" },
+                      );
+                    }
+                    if (config.traces.cumulativeShort) {
+                      dataGraph.addTrace(
+                          (i) => 1 - timeline[i].shortWindow.errorRate(),
+                          { name: "short window" },
+                      );
+                    }
+                    if (config.traces.burnLong) {
+                      dataGraph.addThreshold(burnRateThreshold);
+                      dataGraph.addTrace(
+                          (i) =>
+                              timeline[i].longWindow.errorRate() /
+                              errorBudgetFraction,
+                          { name: "long window" },
+                      );
+                    }
+                    if (config.traces.burnShort) {
+                      dataGraph.addTrace(
+                          (i) =>
+                              timeline[i].shortWindow.errorRate() /
+                              errorBudgetFraction,
+                          { name: "short window" },
+                      );
+                    }
 
                     dataGraph.addAlert((i) => {
                         const l =
@@ -137,114 +166,93 @@
                             errorBudgetFraction;
                         return l > burnRateThreshold && s > burnRateThreshold;
                     });
-                    dataGraph.render("events");
+                    dataGraph.render(this.elem);
+                }
 
-                    var cumulativeGraph = new Timeseries(
-                        this.totalSeconds,
-                        this.sampleRateSeconds,
-                        {
-                            type: "scatter",
-                        },
-                    );
-                    cumulativeGraph.addTrace(
-                        (i) => 1 - timeline[i].cumulative.errorRate(),
-                        { name: "cumulative" },
-                    );
-                    cumulativeGraph.addTrace(
-                        (i) => 1 - timeline[i].longWindow.errorRate(),
-                        { name: "long window" },
-                    );
-                    cumulativeGraph.addTrace(
-                        (i) => 1 - timeline[i].shortWindow.errorRate(),
-                        { name: "short window" },
-                    );
-                    cumulativeGraph.addAlert((i) => {
-                        const l =
-                            timeline[i].longWindow.errorRate() /
-                            errorBudgetFraction;
-                        const s =
-                            timeline[i].shortWindow.errorRate() /
-                            errorBudgetFraction;
-                        return l > 2 && s > 2;
-                    });
-                    cumulativeGraph.render("cumulative");
+                // Fill out the config object, using values from Elements and calling functions.
+                hydrateConfig(config) {
+                  function doHydrateConfig(obj) {
+                    var out = {}
+                    for (const [key, value] of Object.entries(obj)) {
+                      if (value instanceof Element) {
+                        out[key] = value.value;
+                      } else if (typeof value === 'function') {
+                        out[key] = value();
+                      } else if (typeof value === "object" && value !== null) {
+                        out[key] = doHydrateConfig(value);
+                      } else {
+                        out[key] = value;
+                      }
+                    }
+                    return out;
+                  }
+                  return doHydrateConfig(config);
+                }
 
-                    var burnGraph = new Timeseries(
-                        this.totalSeconds,
-                        this.sampleRateSeconds,
-                        {
-                            type: "scatter",
-                        },
-                    );
-                    burnGraph.addTrace(
-                        (i) =>
-                            timeline[i].cumulative.errorRate() /
-                            errorBudgetFraction,
-                        { name: "cumulative" },
-                    );
-                    burnGraph.addTrace(
-                        (i) =>
-                            timeline[i].longWindow.errorRate() /
-                            errorBudgetFraction,
-                        { name: "long window" },
-                    );
-                    burnGraph.addTrace(
-                        (i) =>
-                            timeline[i].shortWindow.errorRate() /
-                            errorBudgetFraction,
-                        { name: "short window" },
-                    );
-                    burnGraph.addAlert((i) => {
-                        const l =
-                            timeline[i].longWindow.errorRate() /
-                            errorBudgetFraction;
-                        const s =
-                            timeline[i].shortWindow.errorRate() /
-                            errorBudgetFraction;
-                        return l > 2 && s > 2;
-                    });
+                render(config) {
 
-                    burnGraph.addThreshold(burnRateThreshold);
+                  // Set up listeners on elements
+                  var alertView = this;
+                  function watchConfig(obj) {
+                    for (const [key, value] of Object.entries(obj)) {
+                      if (value instanceof Element) {
+                        value.addEventListener("change", () => {
+                          alertView.renderWithHydratedConfig(alertView.hydrateConfig(config));
+                        });
+                        continue;
+                      }
+                      if (typeof value === "object" && value !== null) {
+                        watchConfig(value);
+                      }
+                    }
+                  }
+                  watchConfig(config);
 
-                    burnGraph.render("budget");
+                  this.renderWithHydratedConfig(this.hydrateConfig(config));
                 }
             }
 
-            ac = new AlertView(TOTAL_SECONDS, SAMPLE_RATE_SECONDS);
+            acEvents = new AlertView("events", TOTAL_SECONDS, SAMPLE_RATE_SECONDS);
+            acCumulative = new AlertView("cumulative", TOTAL_SECONDS, SAMPLE_RATE_SECONDS);
+            acBudget = new AlertView("budget", TOTAL_SECONDS, SAMPLE_RATE_SECONDS);
 
-            const inputSloTargetPercent = document.querySelector(
-                'input[name="slo_target_percent"]',
-            );
-            const inputLongWindowSeconds = document.querySelector(
-                'input[name="long_window_seconds"]',
-            );
-            const inputShortWindowSeconds = document.querySelector(
-                'input[name="short_window_seconds"]',
-            );
-            const inputMaxErrorPercent = document.querySelector(
-                'input[name="max_error_percent"]',
-            );
-            const inputBurnRateThreshold = document.querySelector(
-                'input[name="burn_rate_threshold"]',
-            );
+            acEvents.render({
+              slo: {
+                targetPercent: document.querySelector('input[name="slo_target_percent"]'),
+                longWindowSeconds: document.querySelector('input[name="long_window_seconds"]'),
+                shortWindowSeconds: document.querySelector('input[name="short_window_seconds"]'),
+                burnRateThreshold: document.querySelector('input[name="burn_rate_threshold"]'),
+              },
+              data: {
+                good: {},
+                bad: {
+                  maxErrorPercent: document.querySelector('input[name="max_error_percent"]'),
+                },
+              },
+              traces: {
+                good: true,
+                bad: true,
+              }
+            });
 
-            doRender = function () {
-                ac.render(
-                    inputSloTargetPercent.value / 100,
-                    inputLongWindowSeconds.value,
-                    inputShortWindowSeconds.value,
-                    inputMaxErrorPercent.value / 100,
-                    inputBurnRateThreshold.value,
-                );
-            };
-
-            inputSloTargetPercent.addEventListener("change", doRender);
-            inputLongWindowSeconds.addEventListener("change", doRender);
-            inputShortWindowSeconds.addEventListener("change", doRender);
-            inputMaxErrorPercent.addEventListener("change", doRender);
-            inputBurnRateThreshold.addEventListener("change", doRender);
-
-            doRender();
+            acBudget.render({
+              slo: {
+                targetPercent: document.querySelector('input[name="slo_target_percent"]'),
+                longWindowSeconds: document.querySelector('input[name="long_window_seconds"]'),
+                shortWindowSeconds: document.querySelector('input[name="short_window_seconds"]'),
+                burnRateThreshold: document.querySelector('input[name="burn_rate_threshold"]'),
+              },
+              data: {
+                good: {},
+                bad: {
+                  maxErrorPercent: document.querySelector('input[name="max_error_percent"]'),
+                },
+              },
+              traces: {
+                burnLong: true,
+                burnShort: true,
+              }
+            });
         </script>
     </body>
 </html>
