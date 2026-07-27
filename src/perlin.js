@@ -1,6 +1,8 @@
-class Perlin {
+import seedrandom from 'seedrandom';
+
+export default class Perlin {
   constructor(seed) {
-    this.rng = new Math.seedrandom(seed);
+    this.rng = seedrandom(seed);
 
     // Quick and dirty permutation table
     this.perm = (() => {

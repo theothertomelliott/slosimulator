@@ -1,4 +1,6 @@
-class Timeseries {
+import Plotly from 'plotly.js-basic-dist';
+
+export class Timeseries {
   constructor(totalSeconds, sampleRateSeconds, defaultTraceSettings) {
     this.xAxis = [];
     var t = new Date();
@@ -132,7 +134,7 @@ class Timeseries {
   }
 }
 
-class SLIWindow {
+export class SLIWindow {
   constructor(maxValues) {
     this.good = [];
     this.bad = [];
