@@ -1,6 +1,6 @@
 {
   "name": "slosimulator",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "A Plotly.js powered widget for simulating burn-rate alerting for SLOs.",
   "scripts": {
     "build": "npx webpack --mode production",
