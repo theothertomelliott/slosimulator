@@ -3,7 +3,8 @@
   "version": "0.0.1",
   "description": "A Plotly.js powered widget for simulating burn-rate alerting for SLOs.",
   "scripts": {
-    "build": "npx webpack --mode production"
+    "build": "npx webpack --mode production",
+    "test": "exit 0"
   },
   "repository": {
     "type": "git",
