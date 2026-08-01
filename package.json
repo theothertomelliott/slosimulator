@@ -1,16 +1,17 @@
 {
   "name": "slosimulator",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "A Plotly.js powered widget for simulating burn-rate alerting for SLOs.",
   "scripts": {
     "build": "npx webpack --mode production",
-    "test": "exit 0"
+    "test": "exit 0",
+    "prepublishOnly": "npm run build"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/theothertomelliott/slosimulator.git"
   },
-  "author": "",
+  "author": "Tom Elliott",
   "license": "MIT",
   "bugs": {
     "url": "https://github.com/theothertomelliott/slosimulator/issues"
@@ -31,5 +32,9 @@
   "dependencies": {
     "plotly.js-basic-dist": "^3.7.0",
     "seedrandom": "^3.0.5"
-  }
+  },
+  "main": "./dist/main.js",
+  "files": [
+    "dist"
+  ]
 }
