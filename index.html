@@ -19,10 +19,6 @@
         Burn rate threshold:
         <input type="text" name="burn_rate_threshold" value="2" /><br />
 
-        <h2>Error Generation</h2>
-        Max Error Percentage:
-        <input type="text" name="max_error_percent" value="10" /><br />
-
         <h1>Events</h1>
         <div id="events" style="height: 500px"></div>
 
@@ -31,48 +27,86 @@
 
         <script>
             const TOTAL_SECONDS = 24 * 60 * 60;
+            const MINUTE = 60 / TOTAL_SECONDS;
+            const HOUR = (60 * 60) / TOTAL_SECONDS;
             const SAMPLE_RATE_SECONDS = 60;
 
-            acEvents = new AlertView("events", TOTAL_SECONDS, SAMPLE_RATE_SECONDS);
-            acCumulative = new AlertView("cumulative", TOTAL_SECONDS, SAMPLE_RATE_SECONDS);
-            acBudget = new AlertView("budget", TOTAL_SECONDS, SAMPLE_RATE_SECONDS);
+            acEvents = new AlertView(
+                "events",
+                TOTAL_SECONDS,
+                SAMPLE_RATE_SECONDS,
+            );
+            acCumulative = new AlertView(
+                "cumulative",
+                TOTAL_SECONDS,
+                SAMPLE_RATE_SECONDS,
+            );
+            acBudget = new AlertView(
+                "budget",
+                TOTAL_SECONDS,
+                SAMPLE_RATE_SECONDS,
+            );
+
+            const seed = 1;
+            var good = DailyCycle();
+            good = Scale(1000000, good);
+            good = PerlinNoise(seed,250000,good);
+            good = RandomNoise(seed,250000, good);
+            //good = Gaussian(2.5, good);
+            good = OffsetY(500000, good);
+
+            // 1 hour of 10% errors from 9am-10am
+            bad = NormalWindow(5 * HOUR, HOUR, Scale(0.1, good), () => 0);
+            bad = Window(12 * HOUR, 1 * MINUTE, Scale(0.05, good), bad);
 
             acEvents.render({
-              slo: {
-                targetPercent: document.querySelector('input[name="slo_target_percent"]'),
-                longWindowSeconds: document.querySelector('input[name="long_window_seconds"]'),
-                shortWindowSeconds: document.querySelector('input[name="short_window_seconds"]'),
-                burnRateThreshold: document.querySelector('input[name="burn_rate_threshold"]'),
-              },
-              data: {
-                good: {},
-                bad: {
-                  maxErrorPercent: document.querySelector('input[name="max_error_percent"]'),
+                slo: {
+                    targetPercent: document.querySelector(
+                        'input[name="slo_target_percent"]',
+                    ),
+                    longWindowSeconds: document.querySelector(
+                        'input[name="long_window_seconds"]',
+                    ),
+                    shortWindowSeconds: document.querySelector(
+                        'input[name="short_window_seconds"]',
+                    ),
+                    burnRateThreshold: document.querySelector(
+                        'input[name="burn_rate_threshold"]',
+                    ),
                 },
-              },
-              traces: {
-                good: true,
-                bad: true,
-              }
+                data: {
+                    good: good,
+                    bad: bad,
+                },
+                traces: {
+                    good: true,
+                    bad: true,
+                },
             });
 
             acBudget.render({
-              slo: {
-                targetPercent: document.querySelector('input[name="slo_target_percent"]'),
-                longWindowSeconds: document.querySelector('input[name="long_window_seconds"]'),
-                shortWindowSeconds: document.querySelector('input[name="short_window_seconds"]'),
-                burnRateThreshold: document.querySelector('input[name="burn_rate_threshold"]'),
-              },
-              data: {
-                good: {},
-                bad: {
-                  maxErrorPercent: document.querySelector('input[name="max_error_percent"]'),
+                slo: {
+                    targetPercent: document.querySelector(
+                        'input[name="slo_target_percent"]',
+                    ),
+                    longWindowSeconds: document.querySelector(
+                        'input[name="long_window_seconds"]',
+                    ),
+                    shortWindowSeconds: document.querySelector(
+                        'input[name="short_window_seconds"]',
+                    ),
+                    burnRateThreshold: document.querySelector(
+                        'input[name="burn_rate_threshold"]',
+                    ),
                 },
-              },
-              traces: {
-                burnLong: true,
-                burnShort: true,
-              }
+                data: {
+                    good: good,
+                    bad: bad,
+                },
+                traces: {
+                    burnLong: true,
+                    burnShort: true,
+                },
             });
         </script>
     </body>

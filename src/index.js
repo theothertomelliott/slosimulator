@@ -1,49 +1,74 @@
 import Perlin from "./perlin.js";
-import createGaussianSmootherWithSeed from "./gaussian.js";
+import seedrandom from "seedrandom";
+import { createGaussianSmoother } from "./gaussian.js";
 import { Timeseries, SLIWindow } from "./timeseries.js";
 
-const USE_PERLIN = false;
-
-// Settings
-// max gap between bursts of Errors
-// max duration of error bursts
-// need to determine current state, then look backwards
-// look back over that number of previous points. see if you need to change the state.
-// window of errors
-function errorAtGen() {
-  var memory = [];
-  function errorAt(i) {}
+function Scale(scale, f) {
+  return (i) => {
+    return scale * f(i);
+  };
 }
 
-function getErrorGenerator(seed) {
+function NormalWindow(start, duration, inside, outside) {
+  function gaussianPDF(x, mean = 0, stdDev = 1) {
+    return Math.exp(-Math.pow(x - mean, 2) / (2 * Math.pow(stdDev, 2)));
+  }
+
+  return (i) => {
+    if (i >= start && i <= start + duration) {
+      const gx = ((i - start) / duration) * 2 * 3.5 - 3.5;
+      return gaussianPDF(gx) * inside(i);
+    }
+    return outside(i);
+  };
+}
+
+function Window(start, duration, inside, outside) {
+  return (i) => {
+    if (i >= start && i <= start + duration) {
+      return inside(i);
+    }
+    return outside(i);
+  };
+}
+
+function OffsetY(offset, f) {
+  return (i) => {
+    return f(i) + offset;
+  };
+}
+
+function DailyCycle() {
+  return (i) => {
+    const amplitude = 1 / 2;
+    return amplitude + amplitude * Math.sin(i * 2 * Math.PI);
+  };
+}
+
+function RandomNoise(seed, amplitude, f) {
+  const rng = seedrandom(seed);
+  return (i) => {
+    var result = f(i);
+    var n = amplitude * (rng(i) - 0.5);
+    return result + n;
+  };
+}
+
+function PerlinNoise(seed, amplitude, f) {
   const perlin = new Perlin(seed);
-  const gauss = createGaussianSmootherWithSeed(seed, -2.5);
-
-  function perlinGen(i) {
-    return perlin.getValue(
-      // TODO: Figure out a better scaling factor
-      256 * i,
-    );
-  }
-
-  function gaussianGen(i) {
-    return gauss(i);
-  }
-
-  function combo(i) {
-    return (gaussianGen(i) + perlinGen(i)) / 2;
-  }
-
-  if (USE_PERLIN) {
-    return perlinGen;
-  }
-  if (true) {
-    return combo;
-  }
-  return gaussianGen;
+  return (i) => {
+    var out = f(i);
+    var noise = amplitude * (perlin.getValue((256 / 10) * i) - 0.5);
+    return out + noise;
+  };
 }
 
-export default class AlertView {
+function Gaussian(sigma, f) {
+  const gauss = createGaussianSmoother(f, sigma);
+  return gauss;
+}
+
+class AlertView {
   constructor(elem, totalSeconds, sampleRateSeconds) {
     this.elem = elem;
     this.totalSeconds = totalSeconds;
@@ -69,8 +94,11 @@ export default class AlertView {
 
     for (var i = 0; i < this.totalSeconds; i += this.sampleRateSeconds) {
       t.setSeconds(t.getSeconds() + this.sampleRateSeconds);
-      const good = config.data.good(i);
-      const bad = config.data.bad(i);
+      var good = config.data.good(i / this.totalSeconds);
+      var bad = config.data.bad(i / this.totalSeconds);
+
+      good = Math.round(Math.max(0, good));
+      bad = Math.round(Math.max(0, bad));
 
       cumulative.push(good, bad);
       longWindow.push(good, bad);
@@ -151,37 +179,20 @@ export default class AlertView {
     const totalSeconds = this.totalSeconds;
     function processData(config) {
       var out = config;
-      if (!out.data.good || typeof out.data.good !== "function") {
+      if (out.data.good && typeof out.data.good !== "function") {
         out.data.good = (i) => {
-          // TODO: Add noise and a daily cycle
-          const amplitude = 100000;
-          return amplitude;
+          return 0;
         };
       }
       if (!out.data.bad) {
         out.data.bad = (i) => {
           return 0;
-        }
+        };
       } else if (typeof out.data.bad !== "function") {
         const errGen = getErrorGenerator(1);
         const maxErrorRate = config.data.bad.maxErrorPercent / 100;
         out.data.bad = (i) => {
-          var errorRate = errGen(i / totalSeconds);
-
-          // Errors can only be above 0
-          if (errorRate < 0) {
-            errorRate = 0;
-          }
-          // Limit error duration
-          if (
-            i < totalSeconds / 4 ||
-            i > totalSeconds / 4 + 3 * 60 * 60
-          ) {
-            errorRate = 0;
-          }
-          // Scale maximum error percentage
-          errorRate *= maxErrorRate;
-          return out.data.good(i) * errorRate;
+          return 0;
         };
       }
       return out;
@@ -213,3 +224,23 @@ export default class AlertView {
 }
 
 window.AlertView = AlertView;
+window.DailyCycle = DailyCycle;
+window.RandomNoise = RandomNoise;
+window.PerlinNoise = PerlinNoise;
+window.Gaussian = Gaussian;
+window.OffsetY = OffsetY;
+window.Scale = Scale;
+window.Window = Window;
+window.NormalWindow = NormalWindow;
+
+export {
+  AlertView,
+  DailyCycle,
+  RandomNoise,
+  PerlinNoise,
+  Gaussian,
+  OffsetY,
+  Scale,
+  Window,
+  NormalWindow,
+};
