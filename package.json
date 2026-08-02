@@ -4,6 +4,7 @@
   "description": "A Plotly.js powered widget for simulating burn-rate alerting for SLOs.",
   "scripts": {
     "build": "npx webpack --mode production",
+    "dev": "npx webpack --mode development --watch",
     "test": "exit 0",
     "prepublishOnly": "npm run build"
   },
