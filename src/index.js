@@ -1,5 +1,50 @@
 import Perlin from './perlin.js';
+import createGaussianSmootherWithSeed from './gaussian.js';
 import { Timeseries, SLIWindow } from './timeseries.js';
+
+const USE_PERLIN = false;
+
+
+// Settings
+// max gap between bursts of Errors
+// max duration of error bursts
+// need to determine current state, then look backwards
+// look back over that number of previous points. see if you need to change the state.
+// window of errors
+function errorAtGen() {
+  var memory = [];
+  function errorAt(i) {
+    
+  }
+}
+
+function getErrorGenerator(seed) {
+  const perlin = new Perlin(seed);
+  const gauss = createGaussianSmootherWithSeed(seed, -2.5);
+
+  function perlinGen(i) {
+    return perlin.getValue(
+      // TODO: Figure out a better scaling factor
+      (256) * (i),
+    );
+  }
+
+  function gaussianGen(i) {
+    return gauss(i);
+  }
+
+  function combo(i) {
+    return (gaussianGen(i) + perlinGen(i)) / 2;
+  }
+
+  if (USE_PERLIN) {
+    return perlinGen;
+  }
+  if (true) {
+    return combo;
+  }
+  return gaussianGen;
+}
 
 export default class AlertView {
     constructor(elem, totalSeconds, sampleRateSeconds) {
@@ -29,7 +74,7 @@ export default class AlertView {
             config.slo.shortWindowSeconds / this.sampleRateSeconds,
         );
 
-        const perlin = new Perlin(3);
+      const errGen = getErrorGenerator(1);
 
         for (
             var i = 0;
@@ -41,9 +86,7 @@ export default class AlertView {
             const amplitude = 100000;
             var good = amplitude;
 
-            var errorRate = perlin.getValue(
-                (256 / 2) * (i / this.totalSeconds),
-            );
+          var errorRate = errGen(i / this.totalSeconds);
 
             // Errors can only be above 0
             if (errorRate < 0) {
